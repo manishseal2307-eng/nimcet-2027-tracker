@@ -527,7 +527,101 @@ function saveState(options = {}) {
   state.updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (!options.skipCloud) scheduleCloudSave();
-}\n\n/* ---------------- Optional cross-device cloud sync ---------------- */\nlet cloud = { enabled: false, ready: false, user: null, db: null, auth: null, timer: null, syncing: false };\nconst CLOUD_DOC = 'nimcet2027';\n\nfunction firebaseConfigured() {\n  return typeof firebase !== 'undefined' && window.NIMCET_FIREBASE_CONFIG &&\n    window.NIMCET_FIREBASE_CONFIG.apiKey &&\n    window.NIMCET_FIREBASE_CONFIG.projectId &&\n    window.NIMCET_FIREBASE_CONFIG.appId &&\n    !String(window.NIMCET_FIREBASE_CONFIG.apiKey).includes('PASTE_');\n}\n\nfunction initCloud() {\n  if (!firebaseConfigured()) return;\n  try {\n    if (!firebase.apps.length) firebase.initializeApp(window.NIMCET_FIREBASE_CONFIG);\n    cloud.auth = firebase.auth();\n    cloud.db = firebase.firestore();\n    cloud.enabled = true;\n    cloud.ready = true;\n    cloud.auth.onAuthStateChanged(async user => {\n      cloud.user = user || null;\n      updateSyncBadge();\n      if (user) await pullCloudState();\n    });\n  } catch (e) {\n    console.warn('Cloud sync unavailable:', e);\n  }\n}\n\nfunction scheduleCloudSave() {\n  if (!cloud.ready || !cloud.user || cloud.syncing) return;\n  clearTimeout(cloud.timer);\n  cloud.timer = setTimeout(pushCloudState, 800);\n}\n\nasync function pushCloudState() {\n  if (!cloud.ready || !cloud.user || cloud.syncing) return;\n  cloud.syncing = true; updateSyncBadge('Saving…');\n  try {\n    await cloud.db.collection('users').doc(cloud.user.uid).collection('apps').doc(CLOUD_DOC).set({\n      state: JSON.stringify(state), updatedAt: state.updatedAt, updatedBy: cloud.user.uid\n    });\n    updateSyncBadge('Synced');\n  } catch (e) {\n    console.warn('Cloud save failed:', e); updateSyncBadge('Sync error');\n  } finally { cloud.syncing = false; }\n}\n\nasync function pullCloudState() {\n  if (!cloud.ready || !cloud.user) return;\n  updateSyncBadge('Checking…');\n  try {\n    const snap = await cloud.db.collection('users').doc(cloud.user.uid).collection('apps').doc(CLOUD_DOC).get();\n    if (snap.exists && snap.data().state) {\n      const remote = JSON.parse(snap.data().state);\n      const remoteTime = Number(snap.data().updatedAt || remote.updatedAt || 0);\n      const localTime = Number(state.updatedAt || 0);\n      if (remoteTime > localTime) {\n        state = Object.assign(defaultState(), remote);\n        saveState({ skipCloud: true });\n        activeWeekIndex = null;\n        render();\n      } else if (localTime > remoteTime) {\n        await pushCloudState();\n      }\n    }\n    updateSyncBadge('Synced');\n  } catch (e) {\n    console.warn('Cloud pull failed:', e); updateSyncBadge('Sync error');\n  }\n}\n\nasync function cloudSignUp(email, password) {\n  if (!cloud.ready) throw new Error('Cloud sync is not configured.');\n  return cloud.auth.createUserWithEmailAndPassword(email, password);\n}\nasync function cloudSignIn(email, password) {\n  if (!cloud.ready) throw new Error('Cloud sync is not configured.');\n  return cloud.auth.signInWithEmailAndPassword(email, password);\n}\nasync function cloudSignOut() { if (cloud.ready) await cloud.auth.signOut(); }\n\nfunction updateSyncBadge(label) {\n  const el = document.getElementById('syncStatus');\n  if (!el) return;\n  if (!cloud.enabled) el.textContent = 'Local only';\n  else if (!cloud.user) el.textContent = 'Not signed in';\n  else el.textContent = label || 'Cloud ready';\n}\n\ninitCloud();\n
+}
+
+/* ---------------- Optional cross-device cloud sync ---------------- */
+let cloud = { enabled: false, ready: false, user: null, db: null, auth: null, timer: null, syncing: false };
+const CLOUD_DOC = 'nimcet2027';
+
+function firebaseConfigured() {
+  return typeof firebase !== 'undefined' && window.NIMCET_FIREBASE_CONFIG &&
+    window.NIMCET_FIREBASE_CONFIG.apiKey &&
+    window.NIMCET_FIREBASE_CONFIG.projectId &&
+    window.NIMCET_FIREBASE_CONFIG.appId &&
+    !String(window.NIMCET_FIREBASE_CONFIG.apiKey).includes('PASTE_');
+}
+
+function initCloud() {
+  if (!firebaseConfigured()) return;
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(window.NIMCET_FIREBASE_CONFIG);
+    cloud.auth = firebase.auth();
+    cloud.db = firebase.firestore();
+    cloud.enabled = true;
+    cloud.ready = true;
+    cloud.auth.onAuthStateChanged(async user => {
+      cloud.user = user || null;
+      updateSyncBadge();
+      if (user) await pullCloudState();
+    });
+  } catch (e) {
+    console.warn('Cloud sync unavailable:', e);
+  }
+}
+
+function scheduleCloudSave() {
+  if (!cloud.ready || !cloud.user || cloud.syncing) return;
+  clearTimeout(cloud.timer);
+  cloud.timer = setTimeout(pushCloudState, 800);
+}
+
+async function pushCloudState() {
+  if (!cloud.ready || !cloud.user || cloud.syncing) return;
+  cloud.syncing = true; updateSyncBadge('Saving…');
+  try {
+    await cloud.db.collection('users').doc(cloud.user.uid).collection('apps').doc(CLOUD_DOC).set({
+      state: JSON.stringify(state), updatedAt: state.updatedAt, updatedBy: cloud.user.uid
+    });
+    updateSyncBadge('Synced');
+  } catch (e) {
+    console.warn('Cloud save failed:', e); updateSyncBadge('Sync error');
+  } finally { cloud.syncing = false; }
+}
+
+async function pullCloudState() {
+  if (!cloud.ready || !cloud.user) return;
+  updateSyncBadge('Checking…');
+  try {
+    const snap = await cloud.db.collection('users').doc(cloud.user.uid).collection('apps').doc(CLOUD_DOC).get();
+    if (snap.exists && snap.data().state) {
+      const remote = JSON.parse(snap.data().state);
+      const remoteTime = Number(snap.data().updatedAt || remote.updatedAt || 0);
+      const localTime = Number(state.updatedAt || 0);
+      if (remoteTime > localTime) {
+        state = Object.assign(defaultState(), remote);
+        saveState({ skipCloud: true });
+        activeWeekIndex = null;
+        render();
+      } else if (localTime > remoteTime) {
+        await pushCloudState();
+      }
+    }
+    updateSyncBadge('Synced');
+  } catch (e) {
+    console.warn('Cloud pull failed:', e); updateSyncBadge('Sync error');
+  }
+}
+
+async function cloudSignUp(email, password) {
+  if (!cloud.ready) throw new Error('Cloud sync is not configured.');
+  return cloud.auth.createUserWithEmailAndPassword(email, password);
+}
+async function cloudSignIn(email, password) {
+  if (!cloud.ready) throw new Error('Cloud sync is not configured.');
+  return cloud.auth.signInWithEmailAndPassword(email, password);
+}
+async function cloudSignOut() { if (cloud.ready) await cloud.auth.signOut(); }
+
+function updateSyncBadge(label) {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (!cloud.enabled) el.textContent = 'Local only';
+  else if (!cloud.user) el.textContent = 'Not signed in';
+  else el.textContent = label || 'Cloud ready';
+}
+
+initCloud();
+
 
 /* ---------------- Date utilities ---------------- */
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -1804,7 +1898,13 @@ function viewSettings() {
     <button class="btn primary" id="saveSettingsBtn">Save settings</button>
   </div>
 
-  <div class="card">\n    <div class="card-head"><h3>📱↔️💻 Cross-device Sync <span class="badge" id="syncStatus">Local only</span></h3></div>\n    <p class="muted">Use the same account on your phone and PC to keep your NIMCET progress synchronized. Your app still works offline; syncing happens when an internet connection is available.</p>\n    <div id="syncPanel"></div>\n  </div>\n\n  <div class="card">
+  <div class="card">
+    <div class="card-head"><h3>📱↔️💻 Cross-device Sync <span class="badge" id="syncStatus">Local only</span></h3></div>
+    <p class="muted">Use the same account on your phone and PC to keep your NIMCET progress synchronized. Your app still works offline; syncing happens when an internet connection is available.</p>
+    <div id="syncPanel"></div>
+  </div>
+
+  <div class="card">
     <div class="card-head"><h3>Data</h3></div>
     <p class="muted">Without cloud sync, everything is stored locally in this browser. If you enable cloud sync above, your tracker state is uploaded to your own Firebase project.</p>
     <div class="btn-row">
@@ -1828,7 +1928,34 @@ function viewSettings() {
   </div>
   `;
 }
-function renderSyncPanel() {\n  const panel = document.getElementById('syncPanel');\n  if (!panel) return;\n  updateSyncBadge();\n  if (!cloud.enabled) {\n    panel.innerHTML = '<p><strong>Cloud sync is not configured yet.</strong> Add your Firebase web config to <code>firebase-config.js</code>, then redeploy the app. Local progress remains fully usable.</p>';\n    return;\n  }\n  if (cloud.user) {\n    panel.innerHTML = `<div class="form-grid"><label>Signed in as <input value="${esc(cloud.user.email || '')}" disabled></label></div><div class="btn-row"><button class="btn primary" id="syncNowBtn">Sync now</button><button class="btn" id="signOutBtn">Sign out</button></div>`;\n    $('#syncNowBtn').addEventListener('click', pullCloudState);\n    $('#signOutBtn').addEventListener('click', async () => { await cloudSignOut(); render(); });\n  } else {\n    panel.innerHTML = `<div class="form-grid"><label>Email <input type="email" id="syncEmail" placeholder="you@example.com" autocomplete="email"></label><label>Password <input type="password" id="syncPassword" placeholder="At least 6 characters" autocomplete="current-password"></label></div><div class="btn-row"><button class="btn primary" id="signInBtn">Sign in & sync</button><button class="btn" id="signUpBtn">Create sync account</button></div><p class="muted">Create the account once, then use the same email and password on every device.</p>`;\n    $('#signInBtn').addEventListener('click', async () => {\n      try { await cloudSignIn($('#syncEmail').value.trim(), $('#syncPassword').value); render(); }\n      catch (e) { alert(e.message || 'Sign-in failed.'); }\n    });\n    $('#signUpBtn').addEventListener('click', async () => {\n      try { await cloudSignUp($('#syncEmail').value.trim(), $('#syncPassword').value); alert('Account created. Your progress will now sync.'); render(); }\n      catch (e) { alert(e.message || 'Could not create account.'); }\n    });\n  }\n}\n\nfunction wireSettings() {\n  renderSyncPanel();\n  $('#saveSettingsBtn').addEventListener('click', () => {
+function renderSyncPanel() {
+  const panel = document.getElementById('syncPanel');
+  if (!panel) return;
+  updateSyncBadge();
+  if (!cloud.enabled) {
+    panel.innerHTML = '<p><strong>Cloud sync is not configured yet.</strong> Add your Firebase web config to <code>firebase-config.js</code>, then redeploy the app. Local progress remains fully usable.</p>';
+    return;
+  }
+  if (cloud.user) {
+    panel.innerHTML = `<div class="form-grid"><label>Signed in as <input value="${esc(cloud.user.email || '')}" disabled></label></div><div class="btn-row"><button class="btn primary" id="syncNowBtn">Sync now</button><button class="btn" id="signOutBtn">Sign out</button></div>`;
+    $('#syncNowBtn').addEventListener('click', pullCloudState);
+    $('#signOutBtn').addEventListener('click', async () => { await cloudSignOut(); render(); });
+  } else {
+    panel.innerHTML = `<div class="form-grid"><label>Email <input type="email" id="syncEmail" placeholder="you@example.com" autocomplete="email"></label><label>Password <input type="password" id="syncPassword" placeholder="At least 6 characters" autocomplete="current-password"></label></div><div class="btn-row"><button class="btn primary" id="signInBtn">Sign in & sync</button><button class="btn" id="signUpBtn">Create sync account</button></div><p class="muted">Create the account once, then use the same email and password on every device.</p>`;
+    $('#signInBtn').addEventListener('click', async () => {
+      try { await cloudSignIn($('#syncEmail').value.trim(), $('#syncPassword').value); render(); }
+      catch (e) { alert(e.message || 'Sign-in failed.'); }
+    });
+    $('#signUpBtn').addEventListener('click', async () => {
+      try { await cloudSignUp($('#syncEmail').value.trim(), $('#syncPassword').value); alert('Account created. Your progress will now sync.'); render(); }
+      catch (e) { alert(e.message || 'Could not create account.'); }
+    });
+  }
+}
+
+function wireSettings() {
+  renderSyncPanel();
+  $('#saveSettingsBtn').addEventListener('click', () => {
     state.examDate = $('#setExamDate').value || state.examDate;
     state.examDateConfirmed = $('#setExamConfirmed').value === 'true';
     state.startDate = $('#setStartDate').value || state.startDate;
