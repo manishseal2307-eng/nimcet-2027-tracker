@@ -1,5 +1,5 @@
 window.NIMCET_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCWdIcs60ukKAWERt0-f8ZCIW0mH7mmUBM",
+  apiKey: "AIzaSyCWdIcs6CukKAWERtO-f8ZCIWOmH7mmUBM",
   authDomain: "nimcet-2027-tracker.firebaseapp.com",
   projectId: "nimcet-2027-tracker",
   storageBucket: "nimcet-2027-tracker.firebasestorage.app",
